@@ -42,4 +42,10 @@ const (
 
 	ReqRestart = 45
 	ResRestart = 46
+
+	ReqAddRobot = 47
+	ResAddRobot = 48
+
+	ReqLeaveTable = 49
+	ResLeaveTable = 50
 )

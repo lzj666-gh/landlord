@@ -9,7 +9,8 @@ PG.createPlay = function (seat, game) {
     if (seat == 0) {
         player.initShotLayer();
     } else if (seat == 1) {
-        player.uiHead.scale.set(-1, 1);
+        //镜像对手头像，保持和原来一样的朝向
+        player.uiHead.scale.x = -player.uiHead.scale.x;
     }
     return player;
 };
@@ -28,28 +29,30 @@ PG.Player = function (seat, game) {
 };
 
 PG.Player.prototype.initUI = function (sx, sy) {
-    this.uiHead = this.game.add.sprite(sx, sy, 'btn', 'icon_default.png');
+    this.uiHead = this.game.add.image(sx, sy, 'avatar_default');
     this.uiHead.anchor.set(0.5, 1);
+    //头像源图 256px，牌桌上按原来的 84px 显示
+    this.uiHead.scale.set(84 / this.uiHead.width, 84 / this.uiHead.height);
 };
 
 PG.Player.prototype.updateInfo = function (uid, name) {
     this.uid = uid;
     if (uid == -1) {
-        this.uiHead.frameName = 'icon_default.png';
+        this.uiHead.loadTexture('avatar_default');
     } else {
-        this.uiHead.frameName = 'icon_farmer.png';
+        this.uiHead.loadTexture('avatar_farmer');
     }
 };
 
 PG.Player.prototype.cleanPokers = function () {
-
-    var length = this.pokerInHand.length;
-    for (var i = 0; i < length; i++) {
-        var pid = this.pokerInHand[i];
-        var p = this.findAPoker(pid);
-        p.kill();
+    for (var pid in this._pokerPic) {
+        if (this._pokerPic.hasOwnProperty(pid)) {
+            this._pokerPic[pid].destroy();
         }
+    }
+    this._pokerPic = {};
     this.pokerInHand = [];
+    this.hintPoker = [];
 }
 
 PG.Player.prototype.initShotLayer = function () {
@@ -57,13 +60,13 @@ PG.Player.prototype.initShotLayer = function () {
     var group = this.shotLayer;
 
     var sy = this.game.world.height * 0.6;
-    var pass = this.game.make.button(0, sy, "btn", this.onPass, this, 'pass.png', 'pass.png', 'pass.png');
+    var pass = this.game.make.button(0, sy, 'ui_action_pass', this.onPass, this);
     pass.anchor.set(0.5, 0);
     group.add(pass);
-    var hint = this.game.make.button(0, sy, "btn", this.onHint, this, 'hint.png', 'hint.png', 'hint.png');
+    var hint = this.game.make.button(0, sy, 'ui_action_hint', this.onHint, this);
     hint.anchor.set(0.5, 0);
     group.add(hint);
-    var shot = this.game.make.button(0, sy, "btn", this.onShot, this, 'shot.png', 'shot.png', 'shot.png');
+    var shot = this.game.make.button(0, sy, 'ui_action_play', this.onShot, this);
     shot.anchor.set(0.5, 0);
     group.add(shot);
 
@@ -74,16 +77,16 @@ PG.Player.prototype.initShotLayer = function () {
 
 PG.Player.prototype.setLandlord = function () {
     this.isLandlord = true;
-    this.uiHead.frameName = 'icon_landlord.png';
+    this.uiHead.loadTexture('avatar_landlord');
 };
 
 PG.Player.prototype.say = function (str) {
 
     var style = {font: "22px Arial", fill: "#ffffff", align: "center"};
-    var sx = this.uiHead.x + this.uiHead.width / 2 + 10;
-    var sy = this.uiHead.y - this.uiHead.height * 0.5;
+    var sx = this.uiHead.x + this.uiHead.displayWidth / 2 + 10;
+    var sy = this.uiHead.y - this.uiHead.displayHeight * 0.5;
     var text = this.game.add.text(sx, sy, str, style);
-    if (this.uiHead.scale.x == -1) {
+    if (this.uiHead.scale.x < 0) {
         text.x = text.x - text.width - 10;
     }
     this.game.time.events.add(2000, text.destroy, text);

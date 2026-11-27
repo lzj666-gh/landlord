@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>斗地主 - 房间列表</title>
+<link rel="stylesheet" href="/static/css/app.css?v=20261127-icons3"/>
+</head>
+<body>
+<input id="user" type="hidden" value="{{.User}}"/>
+
+<main id="room-list" class="room-list" {{if not .LoggedIn}}hidden{{end}}>
+    <header class="lobby-head">
+        <div class="brand">
+            <span class="brand-mark"><img src="/static/i/icons/cards.png" alt=""/></span>
+            <span class="brand-text">
+                <strong>斗地主</strong>
+                <small>经典三人局 · 金币场</small>
+            </span>
+        </div>
+        <div class="room-user">
+            <span class="coin-badge"><img class="icon" src="/static/i/icons/coin.png" alt=""/>金币 <strong>{{.Coin}}</strong></span>
+            <a class="pill-link" href="/shop"><img class="icon" src="/static/i/icons/shop.png" alt=""/>外观商店</a>
+            <span class="user-chip">
+                <img class="avatar" src="/static/i/avatars/default.png" alt=""/>
+                <span>欢迎回来 <strong>{{.Username}}</strong></span>
+            </span>
+            <button id="logout" class="pill-link pill-quiet" type="button" title="退出登录">
+                <img class="icon" src="/static/i/icons/exit.png" alt=""/>退出
+            </button>
+        </div>
+    </header>
+
+    <p class="hint">选择一个房间进入；人不够时可以点空位或「加机器人」补齐三个人。</p>
+
+    <ul class="rooms">
+        {{range .Rooms}}
+        <li>
+            <a class="room-card" href="/room/{{.RoomId}}">
+                <span class="room-icon"><img src="/static/i/icons/{{if eq .RoomId 1}}robot{{else}}cards{{end}}.png" alt=""/></span>
+                <span class="room-body">
+                    <span class="room-name">{{.Name}}</span>
+                    <span class="room-desc">{{.Desc}}</span>
+                    <span class="room-stats">
+                        <span class="stat"><img class="icon" src="/static/i/icons/coin.png" alt=""/>底注 {{.EntranceFee}}</span>
+                        <span class="stat">牌桌 {{.Tables}} 张</span>
+                        <span class="stat">在玩 {{.Players}} 人</span>
+                    </span>
+                </span>
+                <span class="room-go"><img src="/static/i/icons/back.png" alt=""/></span>
+            </a>
+        </li>
+        {{end}}
+    </ul>
+</main>
+
+<main id="auth-panel" aria-label="登录或注册" {{if .LoggedIn}}hidden{{end}}>
+    <section class="auth-card">
+        <span class="brand-mark auth-mark"><img src="/static/i/icons/cards.png" alt=""/></span>
+        <h1>斗地主</h1>
+        <p>登录后开始游戏</p>
+        <form id="auth-form">
+            <label for="auth-username">用户名</label>
+            <input id="auth-username" name="username" type="text" autocomplete="username" required maxlength="32"/>
+            <label for="auth-password">密码</label>
+            <input id="auth-password" type="password" autocomplete="current-password" required/>
+            <div id="auth-confirm-row" hidden>
+                <label for="auth-password-again">再次输入密码</label>
+                <input id="auth-password-again" type="password" autocomplete="new-password"/>
+            </div>
+            <p id="auth-error" role="status" aria-live="polite"></p>
+            <button id="auth-submit" type="submit">登录</button>
+        </form>
+        <button id="auth-toggle" type="button">没有账号？立即注册</button>
+    </section>
+</main>
+
+<script src="/static/js/auth.js?v=20261126-routes"></script>
+<script>
+(function () {
+    var user = JSON.parse(document.getElementById("user").value);
+    if (!user.uid) {
+        PGAuth.bindForm();
+        return;
+    }
+    document.getElementById("logout").addEventListener("click", function () {
+        fetch('/loginOut', {method: 'POST'}).then(function () {
+            window.location.reload();
+        });
+    });
+})();
+</script>
+</body>
+</html>

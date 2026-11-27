@@ -51,7 +51,7 @@ func wsRequest(data []interface{}, client *Client) {
 			res := make([][2]int, 0)
 			for _, table := range client.Room.Tables {
 				if len(table.TableClients) < 3 {
-					res = append(res, [2]int{int(table.TableId), len(table.TableClients)})
+					res = append(res, [2]int{int(table.TableId), table.humanCount()})
 				}
 			}
 			client.sendMsg([]interface{}{common.ResJoinRoom, res})
@@ -73,29 +73,66 @@ func wsRequest(data []interface{}, client *Client) {
 			return
 		}
 		client.Room.Lock.RLock()
-		defer client.Room.Lock.RUnlock()
-
+		joined := false
 		if table, ok := client.Room.Tables[tableId]; ok {
-			table.joinTable(client)
+			joined = table.joinTable(client)
 		}
+		client.Room.Lock.RUnlock()
+
+		if !joined {
+			//没坐上（桌子没了或者满员），刷新一下可选牌桌列表
+			client.sendRoomTables()
+		}
+
+	case common.ReqLeaveTable:
+		//一局结束后离开牌桌，回到选择牌桌界面
+		table := client.Table
+		if table == nil {
+			client.sendMsg([]interface{}{common.ResLeaveTable, true})
+			client.sendRoomTables()
+			return
+		}
+		if !table.leaveTable(client) {
+			client.sendMsg([]interface{}{common.ResLeaveTable, false, "牌局进行中，不能离开"})
+			return
+		}
+		client.sendMsg([]interface{}{common.ResLeaveTable, true})
 		client.sendRoomTables()
+	case common.ReqAddRobot:
+		//玩家手动加机器人补齐三个人
+		table := client.Table
+		if table == nil {
+			logs.Error("user [%d] request add robot but has no table", client.UserInfo.UserId)
+			return
+		}
+		ok, reason := table.addRobotByUser(client, client.Room)
+		if !ok {
+			logs.Debug("user [%d] add robot refused: %s", client.UserInfo.UserId, reason)
+		}
+		client.sendMsg([]interface{}{common.ResAddRobot, ok, reason})
 	case common.ReqDealPoker:
 		if client.Table.State == GameEnd {
 			client.Ready = true
 		}
 	case common.ReqCallScore:
 		logs.Debug("[%v] ReqCallScore %v", client.UserInfo.Username, data)
-		client.Table.Lock.Lock()
-		defer client.Table.Lock.Unlock()
-
-		if client.Table.State != GameCallScore {
-			logs.Debug("game call score at run time ,%v", client.Table.State)
+		table := client.Table
+		if table == nil {
 			return
 		}
-		if client.Table.GameManage.Turn == client || client.Table.GameManage.FirstCallScore == client {
-			client.Table.GameManage.Turn = client.Next
-		} else {
-			logs.Debug("user [%v] call score turn err ")
+		table.Lock.Lock()
+		defer table.Lock.Unlock()
+
+		if table.State != GameCallScore {
+			logs.Debug("game call score at run time ,%v", table.State)
+			return
+		}
+		if client.IsCalled {
+			return
+		}
+		if table.GameManage.Turn != client && table.GameManage.FirstCallScore != client {
+			logs.Debug("user [%v] call score turn err ", client.UserInfo.Username)
+			return
 		}
 		if len(data) < 2 {
 			return
@@ -104,37 +141,45 @@ func wsRequest(data []interface{}, client *Client) {
 		if s, ok := data[1].(float64); ok {
 			score = int(s)
 		}
-
-		if score > 0 && score < client.Table.GameManage.MaxCallScore || score > 3 {
+		if score > 0 && score < table.GameManage.MaxCallScore || score > 3 {
 			logs.Error("player[%d] call score[%d] cheat", client.UserInfo.UserId, score)
 			return
 		}
-		if score > client.Table.GameManage.MaxCallScore {
-			client.Table.GameManage.MaxCallScore = score
-			client.Table.GameManage.MaxCallScoreTurn = client
+		table.GameManage.Turn = client.Next
+		if score > table.GameManage.MaxCallScore {
+			table.GameManage.MaxCallScore = score
+			table.GameManage.MaxCallScoreTurn = client
 		}
 		client.IsCalled = true
-		callEnd := score == 3 || client.Table.allCalled()
+		callEnd := score == 3 || table.allCalled()
 		userCall := []interface{}{common.ResCallScore, client.UserInfo.UserId, score, callEnd}
-		for _, c := range client.Table.TableClients {
+		for _, c := range table.TableClients {
 			c.sendMsg(userCall)
 		}
 		if callEnd {
 			logs.Debug("call score end")
-			client.Table.callEnd()
+			table.callEnd()
 		}
 	case common.ReqShotPoker:
 		logs.Debug("user [%v] ReqShotPoker %v", client.UserInfo.Username, data)
-		client.Table.Lock.Lock()
-		defer func() {
-			client.Table.GameManage.Turn = client.Next
-			client.Table.Lock.Unlock()
-		}()
-
-		if client.Table.GameManage.Turn != client {
-			logs.Error("shot poker err,not your [%d] turn .[%d]", client.UserInfo.UserId, client.Table.GameManage.Turn.UserInfo.UserId)
+		table := client.Table
+		if table == nil {
 			return
 		}
+		table.Lock.Lock()
+		defer table.Lock.Unlock()
+
+		if table.State != GamePlaying {
+			return
+		}
+		if table.GameManage.Turn != client {
+			logs.Error("shot poker err,not your [%d] turn", client.UserInfo.UserId)
+			return
+		}
+		//只有轮到自己的请求才会把出牌权交给下家，避免乱序请求打乱整个牌桌
+		defer func() {
+			table.GameManage.Turn = client.Next
+		}()
 		if len(data) > 1 {
 			if pokers, ok := data[1].([]interface{}); ok {
 				shotPokers := make([]int, 0, len(pokers))
@@ -204,18 +249,22 @@ func wsRequest(data []interface{}, client *Client) {
 			}
 		}
 	case common.ReqRestart:
-		client.Table.Lock.Lock()
-		defer client.Table.Lock.Unlock()
-
-		if client.Table.State == GameEnd {
-			client.Ready = true
-			for _, c := range client.Table.TableClients {
-				if c.Ready == false {
-					return
-				}
-			}
-			logs.Debug("restart")
-			client.Table.reset()
+		//一局结束后点“再来一把”：桌上够三个人就立刻开下一局
+		table := client.Table
+		if table == nil {
+			return
 		}
+		table.Lock.Lock()
+		defer table.Lock.Unlock()
+
+		if table.State != GameEnd {
+			return
+		}
+		if len(table.TableClients) < 3 {
+			client.sendMsg([]interface{}{common.ResRestart, false, "人数不足，请先添加机器人"})
+			return
+		}
+		logs.Debug("restart")
+		table.reset()
 	}
 }

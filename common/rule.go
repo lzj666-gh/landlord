@@ -1,8 +1,8 @@
 package common
 
 import (
-	"sort"
 	"github.com/astaxie/beego/logs"
+	"sort"
 )
 
 func SortStr(pokers string) (sortPokers string) {
@@ -40,7 +40,7 @@ func IsContains(parent, child string) (result bool) {
 }
 
 //将牌编号转换为扑克牌
-func ToPokers(num []int) (string) {
+func ToPokers(num []int) string {
 	totalCards := "A234567890JQK"
 	res := make([]byte, 0)
 	for _, poker := range num {
@@ -86,7 +86,7 @@ func pokersInHand(num []int, findPokers string) (pokers []int) {
 	for _, poker := range findPokers {
 		poker := ToPoker(byte(poker))
 	out:
-		for _,pItem := range poker {
+		for _, pItem := range poker {
 			for _, n := range num {
 				if pItem == n && !isInResPokers(n) {
 					pokers = append(pokers, pItem)
@@ -109,7 +109,6 @@ func pokersValue(pokers string) (cardType string, score int) {
 
 //比较牌大小,并返回是否翻倍
 func ComparePoker(baseNum, comparedNum []int) (int, bool) {
-	logs.Debug("comparedNum %v  %v", baseNum, comparedNum)
 	if len(baseNum) == 0 || len(comparedNum) == 0 {
 		if len(baseNum) == 0 && len(comparedNum) == 0 {
 			return 0, false
@@ -127,7 +126,6 @@ func ComparePoker(baseNum, comparedNum []int) (int, bool) {
 	}
 	baseType, baseScore := pokersValue(ToPokers(baseNum))
 	comparedType, comparedScore := pokersValue(ToPokers(comparedNum))
-	logs.Debug("compare poker %v, %v, %v, %v", baseType, baseScore, comparedType, comparedScore)
 	if baseType == comparedType {
 		return comparedScore - baseScore, false
 	}

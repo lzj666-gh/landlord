@@ -2,3 +2,10 @@
 *.exe
 *.exe~
 *.log
+/landlord-server
+/main
+/pid/
+/logs/
+/Backups/
+/outputs/
+.qwenwork-media-result-*.json

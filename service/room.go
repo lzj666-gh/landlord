@@ -1,8 +1,9 @@
 package service
 
 import (
-	"sync"
 	"github.com/astaxie/beego/logs"
+	"sort"
+	"sync"
 )
 
 var (
@@ -10,14 +11,20 @@ var (
 		Rooms: map[int]*Room{
 			1: {
 				RoomId:      1,
+				Name:        "人机练习",
+				Desc:        "和机器人练手，随时可以补齐三个人",
 				AllowRobot:  true,
-				EntranceFee: 200,
+				BotLevel:    defaultBotLevel(),
+				EntranceFee: 500,
 				Tables:      make(map[TableId]*Table),
 			},
 			2: {
 				RoomId:      2,
-				AllowRobot:  false,
-				EntranceFee: 200,
+				Name:        "多人对战",
+				Desc:        "和好友开一桌，人不够也能加机器人",
+				AllowRobot:  true,
+				BotLevel:    defaultBotLevel(),
+				EntranceFee: 500,
 				Tables:      make(map[TableId]*Table),
 			},
 		},
@@ -34,10 +41,59 @@ type RoomManager struct {
 
 type Room struct {
 	RoomId      RoomId
+	Name        string
+	Desc        string
 	Lock        sync.RWMutex
-	AllowRobot  bool
+	AllowRobot  bool     //允许玩家手动添加机器人补齐人数
+	BotLevel    botLevel //本房间机器人的默认难度
 	Tables      map[TableId]*Table
 	EntranceFee int
+}
+
+//房间列表页要用的房间概况
+type RoomInfo struct {
+	RoomId      int
+	Name        string
+	Desc        string
+	AllowRobot  bool
+	Tables      int //牌桌数
+	Players     int //桌上的真人
+	EntranceFee int //底注
+}
+
+//当前所有房间的概况，按房间号排序
+func RoomsInfo() []RoomInfo {
+	roomManager.Lock.RLock()
+	defer roomManager.Lock.RUnlock()
+	infos := make([]RoomInfo, 0, len(roomManager.Rooms))
+	for _, room := range roomManager.Rooms {
+		room.Lock.RLock()
+		info := RoomInfo{
+			RoomId:      int(room.RoomId),
+			Name:        room.Name,
+			Desc:        room.Desc,
+			AllowRobot:  room.AllowRobot,
+			Tables:      len(room.Tables),
+			EntranceFee: room.EntranceFee,
+		}
+		for _, table := range room.Tables {
+			table.Lock.RLock()
+			info.Players += table.humanCount()
+			table.Lock.RUnlock()
+		}
+		room.Lock.RUnlock()
+		infos = append(infos, info)
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].RoomId < infos[j].RoomId })
+	return infos
+}
+
+//房间是否存在
+func RoomExists(roomId int) bool {
+	roomManager.Lock.RLock()
+	defer roomManager.Lock.RUnlock()
+	_, ok := roomManager.Rooms[roomId]
+	return ok
 }
 
 //新建牌桌

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>斗地主 - 外观商店</title>
+<link rel="stylesheet" href="/static/css/app.css?v=20261127-icons3"/>
+</head>
+<body>
+<input id="user" type="hidden" value="{{.User}}"/>
+<main class="shop">
+    <header class="shop-header">
+        <div>
+            <a class="shop-back" href="/room/list"><img class="icon" src="/static/i/icons/back.png" alt=""/>返回房间列表</a>
+            <h1>外观商店</h1>
+            <p class="shop-sub">买下的背景和牌面会一直留在账号里，下次进牌桌自动生效。</p>
+        </div>
+        <div class="wallet">
+            <span class="wallet-label"><img class="icon" src="/static/i/icons/coin.png" alt=""/>我的金币</span>
+            <strong id="wallet-coin">{{.Coin}}</strong>
+        </div>
+    </header>
+
+    <p class="hint shop-hint">每局按「底注 500 × 叫分 1-3 × 倍数（炸弹/王炸翻倍）」结算金币；金币低于 1000 时会自动补足到 1000。</p>
+    <p id="shop-error" class="shop-error" role="status" aria-live="polite"></p>
+
+    <section class="shop-section">
+        <h2><img class="icon section-icon" src="/static/i/icons/picture.png" alt=""/>牌桌背景</h2>
+        <ul class="shop-grid">
+            {{range .Items}}{{if eq .Kind "background"}}
+            <li class="shop-card{{if .Equipped}} equipped{{end}}" data-item="{{.ID}}" data-kind="{{.Kind}}">
+                <div class="preview bg-preview"><img src="{{.Asset}}" alt="{{.Name}}"/></div>
+                <div class="meta">
+                    <span class="name">{{.Name}}</span>
+                    <span class="desc">{{.Desc}}</span>
+                </div>
+                <div class="actions">
+                    {{if eq .Price 0}}<span class="tag free">默认</span>{{else}}<span class="price">{{.Price}} 金币</span>{{end}}
+                    <span class="action-slot"></span>
+                </div>
+            </li>
+            {{end}}{{end}}
+        </ul>
+    </section>
+
+    <section class="shop-section">
+        <h2><img class="icon section-icon" src="/static/i/icons/card.png" alt=""/>牌面</h2>
+        <ul class="shop-grid">
+            {{range .Items}}{{if eq .Kind "cardface"}}
+            <li class="shop-card{{if .Equipped}} equipped{{end}}" data-item="{{.ID}}" data-kind="{{.Kind}}">
+                <div class="preview card-preview" style="background-image:url('{{.Asset}}')" aria-label="{{.Name}}"></div>
+                <div class="meta">
+                    <span class="name">{{.Name}}</span>
+                    <span class="desc">{{.Desc}}</span>
+                </div>
+                <div class="actions">
+                    {{if eq .Price 0}}<span class="tag free">默认</span>{{else}}<span class="price">{{.Price}} 金币</span>{{end}}
+                    <span class="action-slot"></span>
+                </div>
+            </li>
+            {{end}}{{end}}
+        </ul>
+    </section>
+</main>
+
+<script>
+//页面首屏状态：已拥有/使用中；后续由 shop.js 按接口返回值重绘按钮
+window.PG_SHOP = {
+    items: [
+        {{range .Items}}{id:"{{.ID}}",kind:"{{.Kind}}",name:"{{.Name}}",price:{{.Price}},owned:{{.Owned}},equipped:{{.Equipped}}},{{end}}
+    ]
+};
+</script>
+<script src="/static/js/shop.js?v=20261127-coinshop"></script>
+</body>
+</html>

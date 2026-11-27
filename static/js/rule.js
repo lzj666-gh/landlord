@@ -4,6 +4,7 @@ PG.Poker = function (game, id, frame) {
 
     this.anchor.set(0.5);
     this.id = id;
+    this.isPokerCard = true;
 
     return this;
 };

@@ -1,10 +1,11 @@
 package common
 
 import (
-	"os"
-	"io"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 )
 
 var (
@@ -19,36 +20,22 @@ type Combination struct {
 }
 
 func init() {
-	path := "rule.json"
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		write()
-	}
-	file, err := os.Open(path)
+	workingDir, err := os.Getwd()
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("find poker rules: get working directory: %v", err))
 	}
-	defer file.Close()
-
-	var jsonStrByte []byte
-	for {
-		buf := make([]byte, 1024)
-		readNum, err := file.Read(buf)
-		if err != nil && err != io.EOF {
-			panic(err)
-		}
-		for i := 0; i < readNum; i++ {
-			jsonStrByte = append(jsonStrByte, buf[i])
-		}
-		if 0 == readNum {
-			break
-		}
+	path, err := findRulePath(workingDir)
+	if err != nil {
+		panic(fmt.Errorf("find poker rules: %v", err))
+	}
+	jsonStrByte, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(fmt.Errorf("read poker rules %q: %v", path, err))
 	}
 	var rule = make(map[string][]string)
 	err = json.Unmarshal(jsonStrByte, &rule)
 	if err != nil {
-		fmt.Printf("json unmarsha1 err:%v \n", err)
-		return
+		panic(fmt.Errorf("decode poker rules %q: %v", path, err))
 	}
 	for pokerType, pokers := range rule {
 		for score, poker := range pokers {
@@ -62,4 +49,26 @@ func init() {
 			TypeToPokers[pokerType] = append(TypeToPokers[pokerType], p)
 		}
 	}
+}
+
+func findRulePath(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			path := filepath.Join(dir, "rule.json")
+			if _, err := os.Stat(path); err != nil {
+				return "", fmt.Errorf("project rule.json not found at %q: %v", path, err)
+			}
+			return path, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("project root containing go.mod not found from %q", startDir)
 }

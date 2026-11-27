@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>card atlas generator</title>
+<style>
+html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="atlas"></canvas>
+<script src="../static/js/generator.js"></script>
+<script>
+// 生成 13x5、每帧 90x120 的牌面精灵图，帧顺序与原版 poker.png 完全一致：
+// 0-12 红桃 A..K，13-25 方块，26-38 黑桃，39-51 梅花，52 大王，53 小王，54 牌背。
+var THEMES = {
+    minimal: {
+        cardTop: '#ffffff', cardBottom: '#eceff1', border: '#aeb7be', inner: null,
+        ink: '#1b2430', red: '#c0392b', backBg: '#2b5f6e', backFg: '#a8dde2'
+    },
+    midnight: {
+        cardTop: '#252d3f', cardBottom: '#131926', border: '#b6934d', inner: '#6f5a2c',
+        ink: '#f0e6cf', red: '#e6b45c', backBg: '#0e1420', backFg: '#c9a24a'
+    },
+    celadon: {
+        cardTop: '#f8fbf7', cardBottom: '#e1ece5', border: '#7d9f92', inner: '#c3d8cd',
+        ink: '#22423a', red: '#b5523c', backBg: '#3f6b5e', backFg: '#b9d6c9'
+    }
+};
+
+var params = new URLSearchParams(window.location.search);
+var theme = THEMES[params.get('theme')] || THEMES.minimal;
+
+CanvasRenderingContext2D.prototype.drawEmptyCard = function (x, y, size) {
+    var ax = function (n) { return x + n * size / 200; },
+        ay = function (n) { return y + n * size / 200; },
+        as = function (n) { return n * size / 200; };
+
+    var grad = this.createLinearGradient(ax(5), ay(5), ax(55), ay(200));
+    grad.addColorStop(0, theme.cardTop);
+    grad.addColorStop(1, theme.cardBottom);
+    this.fillStyle = grad;
+    this.fillRoundRect(ax(0), ay(0), as(150), as(200), as(16));
+    this.strokeStyle = theme.border;
+    this.strokeRoundRect(ax(0), ay(0), as(150), as(200), as(16));
+    if (theme.inner) {
+        this.strokeStyle = theme.inner;
+        this.strokeRoundRect(ax(4), ay(4), as(142), as(192), as(13));
+    }
+};
+
+CanvasRenderingContext2D.prototype.drawPokerCard = function (x, y, size, suit, point) {
+    var ax = function (n) { return x + n * size / 200; },
+        ay = function (n) { return y + n * size / 200; },
+        as = function (n) { return n * size / 200; };
+
+    suit = fixSuit(suit);
+    point = fixSymbol(point);
+
+    this.drawEmptyCard(ax(0), ay(0), as(200));
+    this.fillStyle = (suit === 'h' || suit === 'd') ? theme.red : theme.ink;
+    if (size >= 100) {
+        if (point !== 'o') {
+            this.fillPokerSymbol(ax(40), ay(65), as(70), suit);
+            this.fillPokerSymbol(ax(10), ay(10), as(40), point);
+            this.fillPokerSymbol(ax(11), ay(55), as(25), suit);
+            this.fillPokerSymbol(ax(140), ay(190), as(-40), point);
+            this.fillPokerSymbol(ax(139), ay(145), as(-25), suit);
+        } else {
+            this.fillPokerSymbol(ax(11), ay(10), as(18), 'o');
+            this.fillPokerSymbol(ax(139), ay(190), as(-18), 'o');
+            if (suit === 'h' || suit === 'd') {
+                this.drawPokerCrown(ax(38), ay(63), as(74), theme.red, theme.red);
+                this.drawPokerCrown(ax(40), ay(65), as(70), '#fdf98b', '#e7bd4f', theme.red);
+            } else {
+                this.drawPokerCrown(ax(38), ay(63), as(74), theme.ink, theme.ink);
+                this.drawPokerCrown(ax(40), ay(65), as(70), theme.ink, theme.border, theme.cardBottom);
+            }
+        }
+    } else {
+        if (point !== 'o') {
+            this.fillPokerSymbol(ax(30), ay(75), as(100), suit);
+            this.fillPokerSymbol(ax(15), ay(15), as(50), point);
+        } else {
+            this.fillPokerSymbol(ax(11), ay(10), as(22), 'o');
+            this.drawPokerCrown(ax(45), ay(73), as(89), theme.ink, theme.ink);
+            this.drawPokerCrown(ax(47), ay(75), as(85), theme.cardTop, theme.border, theme.ink);
+        }
+    }
+};
+
+(function () {
+    var h = 120, w = 90;
+    var canvas = document.getElementById('atlas');
+    var ctx = canvas.getContext('2d');
+    canvas.width = 13 * w;
+    canvas.height = 5 * h;
+
+    var suits = ['hearts', 'diamonds', 'spades', 'clubs'],
+        points = ['a', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'j', 'q', 'k'],
+        x = 0, y = 0;
+
+    for (var ks = 0; ks < suits.length; ks++) {
+        for (var kp = 0; kp < points.length; kp++) {
+            ctx.drawPokerCard(x, y, h, suits[ks], points[kp]);
+            x += w;
+        }
+        x = 0;
+        y += h;
+    }
+    // 52 大王、53 小王、54 牌背
+    ctx.drawPokerCard(0, y, h, 'hearts', 'joker');
+    ctx.drawPokerCard(w, y, h, 'spades', 'joker');
+    x = 2 * w;
+    for (var i = 0; i < 11; i++) {
+        ctx.drawPokerBack(x, y, h, theme.backFg, theme.backBg);
+        x += w;
+    }
+})();
+</script>
+</body>
+</html>

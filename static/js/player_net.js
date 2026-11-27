@@ -76,14 +76,13 @@ PG.NetPlayer.prototype.reDealPoker = function () {
 };
 
 PG.NetPlayer.prototype.cleanPokers = function () {
-
-    var length = this.pokerInHand.length;
-    for (var i = 0; i < length; i++) {
-        var pid = this.pokerInHand[i];
-        var p = this.findAPoker(pid);
-        p.kill();
-        }
+    for (var i = 0; i < this._pokerPic.length; i++) {
+        this._pokerPic[i].destroy();
+    }
+    this._pokerPic = [];
     this.pokerInHand = [];
+    this.hintPoker = [];
+    this.updateLeftPoker();
 }
 
 PG.NetPlayer.prototype.dealPokerAnim = function (p, i) {

@@ -40,7 +40,21 @@ PG.Protocol = {
     RSP_CHAT : 44,
 
     REQ_RESTART : 45,
-    RSP_RESTART : 46
+    RSP_RESTART : 46,
+
+    REQ_ADD_ROBOT : 47,
+    RSP_ADD_ROBOT : 48,
+
+    REQ_LEAVE_TABLE : 49,
+    RSP_LEAVE_TABLE : 50
+};
+
+//牌桌状态，与服务端 GameWaitting/GameCallScore/GamePlaying/GameEnd 对应
+PG.GameState = {
+    WAITTING : 0,
+    CALL_SCORE : 1,
+    PLAYING : 2,
+    END : 3
 };
 
 PG.Socket = {

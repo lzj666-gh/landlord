@@ -2,13 +2,15 @@ package service
 
 import (
 	"bytes"
-	"net/http"
-	"time"
-	"github.com/gorilla/websocket"
-	"github.com/astaxie/beego/logs"
 	"encoding/json"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/astaxie/beego/logs"
+	"github.com/gorilla/websocket"
 	"landlord/common"
-	"strconv"
 )
 
 const (
@@ -27,17 +29,33 @@ var (
 	upGrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
-		CheckOrigin:     func(r *http.Request) bool { return true },
-	}//不验证origin
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return false
+			}
+			parsed, err := url.Parse(origin)
+			if err != nil || !strings.EqualFold(parsed.Host, r.Host) {
+				return false
+			}
+			expectedScheme := "http"
+			if r.TLS != nil {
+				expectedScheme = "https"
+			}
+			return parsed.Scheme == expectedScheme
+		},
+	}
 )
 
 type UserId int
 
 type UserInfo struct {
-	UserId   UserId `json:"user_id"`
-	Username string `json:"username"`
-	Coin     int    `json:"coin"`
-	Role     int
+	UserId     UserId `json:"user_id"`
+	Username   string `json:"username"`
+	Coin       int    `json:"coin"`
+	Background string `json:"background,omitempty"`
+	CardFace   string `json:"cardface,omitempty"`
+	Role       int
 }
 
 type Client struct {
@@ -48,15 +66,19 @@ type Client struct {
 	HandPokers []int
 	Ready      bool
 	IsCalled   bool    //是否叫完分
-	Next       *Client	//链表
+	Next       *Client //链表
 	IsRobot    bool
-	toRobot    chan []interface{}	//发送给robot的消息
-	toServer   chan []interface{}	//robot发送给服务器
+	BotLevel   botLevel           //机器人的难度
+	Offline    bool               //连接已断开，座位保留等待重连
+	toRobot    chan []interface{} //发送给robot的消息（测试里的假机器人用）
+	inbox      *robotInbox        //真实机器人用：不设上限，发消息不会阻塞牌桌
+	toServer   chan []interface{} //robot发送给服务器
+	msgBox     chan []interface{} //测试用：不经过网络，直接收集下发的消息
 }
 
 //重置状态
 func (c *Client) reset() {
-	c.UserInfo.Role = 1
+	c.UserInfo.Role = RoleFarmer
 	c.HandPokers = make([]int, 0, 21)
 	c.Ready = false
 	c.IsCalled = false
@@ -67,15 +89,32 @@ func (c *Client) sendRoomTables() {
 	res := make([][2]int, 0)
 	for _, table := range c.Room.Tables {
 		if len(table.TableClients) < 3 {
-			res = append(res, [2]int{int(table.TableId), len(table.TableClients)})
+			res = append(res, [2]int{int(table.TableId), table.humanCount()})
 		}
 	}
 	c.sendMsg([]interface{}{common.ResTableList, res})
 }
 
 func (c *Client) sendMsg(msg []interface{}) {
+	if c.Offline {
+		//座位还在，但连接已经断开，等重连后再补发
+		return
+	}
+	if c.msgBox != nil {
+		//测试里的真人客户端没有 websocket，消息直接进收件箱
+		c.msgBox <- msg
+		return
+	}
 	if c.IsRobot {
+		if c.inbox != nil {
+			c.inbox.push(msg)
+			return
+		}
 		c.toRobot <- msg
+		return
+	}
+	if c.conn == nil {
+		//没有连接的客户端（测试里的假客户端）不需要回消息
 		return
 	}
 	msgByte, err := json.Marshal(msg)
@@ -92,54 +131,52 @@ func (c *Client) sendMsg(msg []interface{}) {
 	if err != nil {
 		err = c.conn.Close()
 		if err != nil {
-			logs.Error("close client err: %v",err)
+			logs.Error("close client err: %v", err)
 		}
 	}
-	_,err = w.Write(msgByte)
+	_, err = w.Write(msgByte)
 	if err != nil {
-		logs.Error("Write msg [%v] err: %v",string(msgByte),err)
+		logs.Error("Write msg [%v] err: %v", string(msgByte), err)
 	}
 	if err := w.Close(); err != nil {
 		err = c.conn.Close()
 		if err != nil {
-			logs.Error("close err: %v",err)
+			logs.Error("close err: %v", err)
 		}
 	}
 }
 
 //光比客户端
 func (c *Client) close() {
-	if c.Table != nil {
-		for _, client := range c.Table.TableClients {
-			if c.Table.Creator == c && c != client {
-				c.Table.Creator = client
-			}
-			if c == client.Next {
-				client.Next = nil
-			}
-		}
-		if len(c.Table.TableClients) != 1 {
-			for _, client := range c.Table.TableClients {
-				if client != client.Table.Creator {
-					client.Table.Creator.Next = client
-				}
-			}
-		}
-		if len(c.Table.TableClients) == 1 {
-			c.Table.Creator = nil
-			delete(c.Room.Tables, c.Table.TableId)
-			return
-		}
-		delete(c.Table.TableClients, c.UserInfo.UserId)
-		if c.Table.State == GamePlaying {
-			c.Table.syncUser()
-			//c.Table.reset()
-		}
-		if c.IsRobot {
-			close(c.toRobot)
-			close(c.toServer)
-		}
+	table := c.Table
+	if table == nil {
+		return
 	}
+	table.Lock.Lock()
+	defer table.Lock.Unlock()
+	if table.TableClients[c.UserInfo.UserId] != c {
+		//座位已经被重连的新连接接管，旧连接不能再改动牌桌
+		return
+	}
+	if !c.IsRobot && (table.State == GameCallScore || table.State == GamePlaying) {
+		//牌局还没打完，保留座位等玩家重连，否则重连后会被当成新玩家重新发牌
+		c.Offline = true
+		logs.Debug("user [%d] offline, keep seat at table[%d]", c.UserInfo.UserId, table.TableId)
+		return
+	}
+	table.removeClient(c)
+	if !table.hasHuman() {
+		//桌上一个真人都没有了，机器人和桌子一起收掉，别在房间里留下空桌
+		for _, robot := range table.robots() {
+			table.removeClient(robot)
+		}
+		table.Creator = nil
+		if c.Room != nil {
+			delete(c.Room.Tables, table.TableId)
+		}
+		return
+	}
+	table.syncUser()
 }
 
 //可能是因为版本问题，导致有些未处理的error
@@ -148,13 +185,6 @@ func (c *Client) readPump() {
 		//logs.Debug("readPump exit")
 		c.conn.Close()
 		c.close()
-		if c.Room.AllowRobot {
-			if c.Table != nil {
-				for _, client := range c.Table.TableClients {
-					client.close()
-				}
-			}
-		}
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -196,37 +226,36 @@ func (c *Client) Ping() {
 }
 
 func ServeWs(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	session, ok := common.GetSession(cookie.Value)
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
 	conn, err := upGrader.Upgrade(w, r, nil)
 	if err != nil {
 		logs.Error("upgrader err:%v", err)
 		return
 	}
-	client := &Client{conn: conn, HandPokers: make([]int, 0, 21), UserInfo: &UserInfo{}}
-	var userId int
-	var username string
-	cookie, err := r.Cookie("userid")
-
+	profile, err := common.LoadProfile(session.UserID)
 	if err != nil {
-		logs.Error("get cookie err: %v", err)
-	} else {
-		userIdStr := cookie.Value
-		userId, err = strconv.Atoi(userIdStr)
+		logs.Error("load profile for user[%d] failed: %v", session.UserID, err)
 	}
-	cookie, err = r.Cookie("username")
-
-	if err != nil {
-		logs.Error("get cookie err: %v", err)
-	} else {
-		username = cookie.Value
+	client := &Client{
+		conn:       conn,
+		HandPokers: make([]int, 0, 21),
+		UserInfo: &UserInfo{
+			UserId:     UserId(session.UserID),
+			Username:   session.Username,
+			Coin:       profile.Coin,
+			Background: profile.Background,
+			CardFace:   profile.CardFace,
+		},
 	}
-
-	if userId != 0 && username != "" {
-		client.UserInfo.UserId = UserId(userId)
-		client.UserInfo.Username = username
-		go client.readPump()
-		go client.Ping()
-		return
-	}
-	logs.Error("user need login first")
-	client.conn.Close()
+	go client.readPump()
+	go client.Ping()
 }
